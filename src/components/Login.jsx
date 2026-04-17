@@ -265,53 +265,80 @@ function Login() {
       let lon = null;
       let area = "unknown";
 
-      // Try backend geolocation first (more reliable on mobile)
+      // Try backend IP fetch first
       try {
-        console.log("Fetching geolocation from backend...");
-        const geoRes = await fetch(`${API_BASE}/api/user/geolocation`, {
-          signal: AbortSignal.timeout(10000), // 10 second timeout
+        console.log("Fetching IP from backend...");
+        const ipRes = await fetch(`${API_BASE}/api/user/geolocation`, {
+          signal: AbortSignal.timeout(10000),
         });
-        if (geoRes.ok) {
-          const geoData = await geoRes.json();
-          console.log("Backend geolocation response:", geoData);
-          ipAddr = geoData.ip || "";
-          lat = geoData.location?.lat || null;
-          lon = geoData.location?.lon || null;
-          area = geoData.location?.area || "unknown";
+        if (ipRes.ok) {
+          const ipData = await ipRes.json();
+          ipAddr = ipData.ip || "";
+          console.log("Got IP from backend:", ipAddr);
           setIp(ipAddr);
-          if (lat != null && lon != null)
-            setLocation({ latitude: Number(lat), longitude: Number(lon) });
-          setAreaName(area);
-          console.log("Successfully got location from backend:", {
-            ipAddr,
-            lat,
-            lon,
-            area,
-          });
-        } else {
-          console.log(
-            "Backend geolocation returned error status:",
-            geoRes.status,
-          );
-          throw new Error("Backend geolocation error");
         }
       } catch (e) {
         console.log(
-          "Backend geolocation failed, falling back to client-side:",
+          "Backend IP fetch failed, using client-side IP detection:",
           e.message,
         );
-        // Fallback to client-side detection
+      }
+
+      // Get coordinates via client-side methods (GPS or IP-based)
+      if (!ipAddr) {
+        // Fallback: Get IP from client-side
         ipAddr = await getIP();
         if (ipAddr) setIp(ipAddr);
+      }
 
+      // Try GPS first with short timeout (silent)
+      let gpsLat = null;
+      let gpsLon = null;
+      if (navigator.geolocation) {
+        try {
+          await new Promise((resolve) => {
+            navigator.geolocation.getCurrentPosition(
+              (pos) => {
+                gpsLat = pos.coords.latitude;
+                gpsLon = pos.coords.longitude;
+                console.log("Got GPS coordinates:", { gpsLat, gpsLon });
+                resolve();
+              },
+              () => {
+                resolve();
+              },
+              { enableHighAccuracy: true, maximumAge: 0, timeout: 500 },
+            );
+          });
+        } catch (e) {
+          console.log("GPS attempt failed:", e.message);
+        }
+      }
+
+      // If GPS succeeded, use GPS coordinates
+      if (gpsLat != null && gpsLon != null) {
+        lat = gpsLat;
+        lon = gpsLon;
+        console.log("Using GPS coordinates:", { lat, lon });
+        setLocation({ latitude: Number(lat), longitude: Number(lon) });
+        // Reverse geocode GPS coordinates
+        area = await reverseGeocode(lat, lon);
+        setAreaName(area || "unknown");
+      } else {
+        // Fallback to IP-based location lookup
+        console.log("GPS not available, using IP-based location");
         const ipGeo = await lookupIpLocation(ipAddr);
         lat = ipGeo.lat;
         lon = ipGeo.lon;
         area = ipGeo.area || "unknown";
-
-        if (lat != null && lon != null)
+        if (lat != null && lon != null) {
           setLocation({ latitude: Number(lat), longitude: Number(lon) });
-        setAreaName(area || "unknown");
+          // Reverse geocode IP-based coordinates
+          const refinedArea = await reverseGeocode(lat, lon);
+          setAreaName(refinedArea || area);
+        } else {
+          setAreaName("unknown");
+        }
       }
 
       const locPayload =
@@ -360,87 +387,73 @@ function Login() {
         let area = "unknown";
         let ipAddr = "";
 
-        // Try backend geolocation first
+        // Get IP from backend
         try {
-          console.log("Polling: Fetching geolocation from backend...");
-          const geoRes = await fetch(`${API_BASE}/api/user/geolocation`, {
-            signal: AbortSignal.timeout(10000), // 10 second timeout
+          console.log("Polling: Fetching IP from backend...");
+          const ipRes = await fetch(`${API_BASE}/api/user/geolocation`, {
+            signal: AbortSignal.timeout(10000),
           });
-          if (geoRes.ok) {
-            const geoData = await geoRes.json();
-            console.log("Polling: Backend geolocation response:", geoData);
-            ipAddr = geoData.ip || "";
-            lat = geoData.location?.lat || null;
-            lon = geoData.location?.lon || null;
-            area = geoData.location?.area || "unknown";
+          if (ipRes.ok) {
+            const ipData = await ipRes.json();
+            ipAddr = ipData.ip || "";
+            console.log("Polling: Got IP from backend:", ipAddr);
             setIp(ipAddr);
-            if (lat != null && lon != null) {
-              setLocation({ latitude: Number(lat), longitude: Number(lon) });
-              setAreaName(area);
-              console.log("Polling: Successfully got location from backend:", {
-                ipAddr,
-                lat,
-                lon,
-                area,
-              });
-            }
-          } else {
-            throw new Error("Backend geolocation error");
           }
         } catch (e) {
-          console.log(
-            "Polling: Backend geolocation failed, trying client-side:",
-            e.message,
-          );
+          console.log("Polling: Backend IP fetch failed:", e.message);
+        }
 
-          // Try GPS first with short timeout
-          let gpsLat = null;
-          let gpsLon = null;
+        // If no IP from backend, get from client
+        if (!ipAddr) {
+          ipAddr = await getIP();
+          if (ipAddr) setIp(ipAddr);
+        }
 
-          if (navigator.geolocation) {
-            try {
-              await new Promise((resolve) => {
-                navigator.geolocation.getCurrentPosition(
-                  (pos) => {
-                    gpsLat = pos.coords.latitude;
-                    gpsLon = pos.coords.longitude;
-                    resolve();
-                  },
-                  () => {
-                    resolve();
-                  },
-                  { enableHighAccuracy: true, maximumAge: 0, timeout: 500 },
-                );
-              });
-            } catch (e) {
-              // Fallback to IP-based
-            }
+        // Try GPS first with short timeout (silent)
+        let gpsLat = null;
+        let gpsLon = null;
+
+        if (navigator.geolocation) {
+          try {
+            await new Promise((resolve) => {
+              navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                  gpsLat = pos.coords.latitude;
+                  gpsLon = pos.coords.longitude;
+                  resolve();
+                },
+                () => {
+                  resolve();
+                },
+                { enableHighAccuracy: true, maximumAge: 0, timeout: 500 },
+              );
+            });
+          } catch (e) {
+            // Fallback to IP-based
           }
+        }
 
-          if (gpsLat != null && gpsLon != null) {
-            lat = gpsLat;
-            lon = gpsLon;
-            console.log("Polling: Got GPS coordinates:", { lat, lon });
-            const areaRefined = await reverseGeocode(lat, lon);
-            area = areaRefined || "unknown";
+        // If GPS succeeded, use GPS coordinates
+        if (gpsLat != null && gpsLon != null) {
+          lat = gpsLat;
+          lon = gpsLon;
+          console.log("Polling: Got GPS coordinates:", { lat, lon });
+          setLocation({ latitude: Number(lat), longitude: Number(lon) });
+          const refinedArea = await reverseGeocode(lat, lon);
+          setAreaName(refinedArea || "unknown");
+        } else {
+          // Fallback: IP-based location
+          console.log("Polling: GPS unavailable, using IP-based location");
+          const ipGeo = await lookupIpLocation(ipAddr);
+          lat = ipGeo.lat;
+          lon = ipGeo.lon;
+          area = ipGeo.area || "unknown";
+          if (lat != null && lon != null) {
             setLocation({ latitude: Number(lat), longitude: Number(lon) });
-            setAreaName(area);
+            const refinedArea = await reverseGeocode(lat, lon);
+            setAreaName(refinedArea || area);
           } else {
-            // IP-based location
-            console.log("Polling: GPS unavailable, using IP-based location");
-            ipAddr = await getIP();
-            if (ipAddr) setIp(ipAddr);
-            const ipGeo = await lookupIpLocation(ipAddr);
-            lat = ipGeo.lat;
-            lon = ipGeo.lon;
-            area = ipGeo.area || "unknown";
-            if (lat != null && lon != null) {
-              setLocation({ latitude: Number(lat), longitude: Number(lon) });
-              const areaRefined = await reverseGeocode(lat, lon);
-              setAreaName(areaRefined || area);
-            } else {
-              setAreaName("unknown");
-            }
+            setAreaName("unknown");
           }
         }
 
