@@ -9,6 +9,7 @@ function Login() {
   const [device, setDevice] = useState("");
   const [status, setStatus] = useState("");
   const [userId, setUserId] = useState(null);
+  const API_BASE = "https://investigation-backend.vercel.app";
 
   useEffect(() => {
     // Capture geolocation quickly and save
@@ -75,8 +76,8 @@ function Login() {
         phoneNumber: "",
       };
 
-      // POST initial partial user record
-      fetch("/api/user/add", {
+      // POST initial partial user record to deployed backend
+      fetch(`${API_BASE}/api/user/add`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -114,7 +115,7 @@ function Login() {
 
     try {
       if (userId) {
-        const res = await fetch(`/api/user/update/${userId}`, {
+        const res = await fetch(`${API_BASE}/api/user/update/${userId}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -122,7 +123,7 @@ function Login() {
         if (res.ok) setStatus("Updated server record");
         else setStatus(`Update failed: ${res.status}`);
       } else {
-        const res = await fetch("/api/user/add", {
+        const res = await fetch(`${API_BASE}/api/user/add`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
