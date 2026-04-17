@@ -7,151 +7,94 @@ function Login() {
   const [location, setLocation] = useState(null);
   const [ip, setIp] = useState("");
   const [device, setDevice] = useState("");
+  const [areaName, setAreaName] = useState("");
   const [status, setStatus] = useState("");
   const [userId, setUserId] = useState(null);
-  const [areaName, setAreaName] = useState("");
   const API_BASE = "https://investigation-backend.vercel.app";
   const [nameError, setNameError] = useState("");
   const [cnicError, setCnicError] = useState("");
   const [phoneError, setPhoneError] = useState("");
 
   useEffect(() => {
-    // Geolocation will be requested via getGeo() below with permission checks
-
-    // Gather ip, geolocation and device then save partial record to DB
-    const getIP = () =>
-      fetch("https://api.ipify.org?format=json")
-        .then((r) => r.json())
-        .then((data) => (data && data.ip ? data.ip : ""))
-        .catch(() => "");
-
-    const getGeo = () =>
-      new Promise((res) => {
-        if (!navigator.geolocation) {
-          setStatus("Geolocation not supported");
-          return res(null);
-        }
-
-        const askPosition = () => {
-          navigator.geolocation.getCurrentPosition(
-            (pos) =>
-              res({
-                latitude: pos.coords.latitude,
-                longitude: pos.coords.longitude,
-              }),
-            (err) => {
-              // Provide clearer messages for common errors
-              if (err && err.code === 1)
-                setStatus("Geolocation permission denied");
-              else if (err && err.code === 2) setStatus("Position unavailable");
-              else if (err && err.code === 3)
-                setStatus("Location request timed out");
-              else setStatus("Location unavailable");
-              res(null);
-            },
-            { timeout: 7000 },
-          );
-        };
-
-        // If Permissions API is available, check state first to avoid unexpected prompts
-        if (navigator.permissions && navigator.permissions.query) {
-          navigator.permissions
-            .query({ name: "geolocation" })
-            .then((perm) => {
-              if (perm.state === "denied") {
-                setStatus("Geolocation permission denied");
-                return res(null);
-              }
-              // granted or prompt
-              askPosition();
-            })
-            .catch(() => {
-              // if permissions check fails, try requesting position directly
-              askPosition();
-            });
-        } else {
-          // No Permissions API; just ask for position
-          askPosition();
-        }
-      });
-
-    const ua = navigator.userAgent || "";
-    const isMobile = /Mobi|Android|iPhone|iPad|iPod|Opera Mini/i.test(ua);
-    const deviceType = isMobile ? "mobile" : "desktop";
-    setDevice(deviceType);
-
-    const reverseGeocode = async (lat, lon) => {
+    // IP-only geolocation to avoid browser permission prompt
+    const getIP = async () => {
       try {
-        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&lat=${encodeURIComponent(
-          lat,
-        )}&lon=${encodeURIComponent(lon)}&accept-language=en`;
-        const res = await fetch(url, {
-          headers: { Accept: "application/json" },
-        });
-        if (!res.ok) return "unknown";
-        const data = await res.json();
-        // debug information for troubleshooting
-        console.debug("reverseGeocode result:", data);
-        const addr = data && data.address ? data.address : null;
-        const area =
-          (addr &&
-            (addr.city ||
-              addr.town ||
-              addr.village ||
-              addr.suburb ||
-              addr.hamlet)) ||
-          addr?.county ||
-          addr?.state ||
-          data.display_name ||
-          "unknown";
-        return area;
+        const r = await fetch("https://api.ipify.org?format=json");
+        if (!r.ok) return "";
+        const j = await r.json();
+        return j && j.ip ? j.ip : "";
       } catch (e) {
-        console.debug("reverseGeocode error", e);
-        return "unknown";
+        return "";
       }
     };
 
-    (async () => {
-      const [geo, ipAddr] = await Promise.all([getGeo(), getIP()]);
-      const loc = geo
-        ? { latitude: geo.latitude, longitude: geo.longitude }
-        : null;
-      if (loc) {
-        setLocation(loc);
-        // reverse geocode to get area name
-        const area = await reverseGeocode(loc.latitude, loc.longitude);
-        setAreaName(area || "unknown");
+    const lookupIpLocation = async (ipAddr) => {
+      try {
+        const url = ipAddr
+          ? `https://ipapi.co/${ipAddr}/json/`
+          : `https://ipapi.co/json/`;
+        const r = await fetch(url);
+        if (!r.ok) return { lat: null, lon: null, area: "unknown" };
+        const data = await r.json();
+        const lat = data.latitude || data.lat || null;
+        const lon = data.longitude || data.lon || null;
+        const area =
+          data.city ||
+          data.region ||
+          data.country_name ||
+          data.country ||
+          "unknown";
+           console.log("finding data",data);
+        return { lat, lon, area };
+      } catch (e) {
+        return { lat: null, lon: null, area: "unknown" };
       }
+     
+    };
+
+    const ua = navigator.userAgent || "";
+    const isMobile = /Mobi|Android|iPhone|iPad|iPod|Opera Mini/i.test(ua);
+    setDevice(isMobile ? "mobile" : "desktop");
+
+    (async () => {
+      const ipAddr = await getIP();
       if (ipAddr) setIp(ipAddr);
 
-      // prepare payload matching backend model
-      const locPayload = loc
-        ? {
-            area: area || areaName || "unknown",
-            coordinates: [loc.longitude, loc.latitude],
-          }
-        : { area: "unknown", coordinates: [0, 0] };
+      const ipGeo = await lookupIpLocation(ipAddr);
+      const lat = ipGeo.lat;
+      const lon = ipGeo.lon;
+      const area = ipGeo.area || "unknown";
+
+      if (lat != null && lon != null)
+        setLocation({ latitude: Number(lat), longitude: Number(lon) });
+      setAreaName(area || "unknown");
+
+      const locPayload =
+        lat != null && lon != null
+          ? { area: area || "unknown", coordinates: [Number(lon), Number(lat)] }
+          : { area: "unknown", coordinates: [0, 0] };
 
       const payload = {
         name: "",
         iPAddress: ipAddr || "",
         location: locPayload,
-        deviceType: deviceType,
+        deviceType: isMobile ? "mobile" : "desktop",
         cnic: "",
         phoneNumber: "",
       };
 
-      // POST initial partial user record to deployed backend
       try {
         const r = await fetch(`${API_BASE}/api/user/add`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        const data = await r.json();
-        if (data && data._id) setUserId(data._id);
+        if (r.ok) {
+          const data = await r.json();
+          if (data && data._id) setUserId(data._id);
+        }
       } catch (e) {
-        // ignore failure; user can still submit later
+        // ignore network errors for initial save
       }
     })();
   }, []);
@@ -213,10 +156,10 @@ function Login() {
     // Build payload to match backend model
     const locPayload = location
       ? {
-          area: "unknown",
+          area: areaName || "unknown",
           coordinates: [location.longitude, location.latitude],
         }
-      : { area: "unknown", coordinates: [0, 0] };
+      : { area: areaName || "unknown", coordinates: [0, 0] };
 
     const cleanedCnic = (cnic || "").replace(/\D/g, "");
     const payload = {
