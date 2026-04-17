@@ -137,67 +137,81 @@ function Login() {
   };
 
   return (
-    <div
-      style={{
-        maxWidth: 480,
-        margin: "24px auto",
-        padding: 16,
-        border: "1px solid #ddd",
-        borderRadius: 8,
-      }}
-    >
-      <h2>Login</h2>
-      <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: 12 }}>
-          <label style={{ display: "block", marginBottom: 6 }}>Name</label>
-          <input
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Full name"
-            style={{ width: "100%", padding: 8 }}
-          />
-        </div>
-        <div style={{ marginBottom: 12 }}>
-          <label style={{ display: "block", marginBottom: 6 }}>CNIC</label>
-          <input
-            required
-            value={cnic}
-            onChange={(e) => setCnic(e.target.value)}
-            placeholder="CNIC"
-            style={{ width: "100%", padding: 8 }}
-          />
-        </div>
-        <div style={{ marginBottom: 12 }}>
-          <label style={{ display: "block", marginBottom: 6 }}>Phone</label>
-          <input
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="Phone (optional)"
-            style={{ width: "100%", padding: 8 }}
-          />
-        </div>
+    <div className="container py-4">
+      <div className="row justify-content-center">
+        <div className="col-12 col-sm-10 col-md-8 col-lg-6">
+          <div className="card shadow-sm">
+            <div className="card-body">
+              <h3 className="card-title mb-3 text-center">
+                Investigation Login
+              </h3>
 
-        <button type="submit" style={{ padding: "8px 16px" }}>
-          Login
-        </button>
-      </form>
+              {status ? (
+                <div
+                  className={`alert ${status.includes("Failed") || status.includes("error") || status.includes("failed") ? "alert-danger" : "alert-success"}`}
+                  role="alert"
+                >
+                  {status}
+                </div>
+              ) : null}
 
-      <div style={{ marginTop: 16, fontSize: 14, color: "#333" }}>
-        <div>
-          <strong>Status:</strong> {status || "idle"}
-        </div>
-        <div>
-          <strong>Location:</strong>{" "}
-          {location
-            ? `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}`
-            : "not captured"}
-        </div>
-        <div>
-          <strong>IP:</strong> {ip || "not captured"}
-        </div>
-        <div>
-          <strong>Device:</strong> {device || "unknown"}
+              <form onSubmit={handleSubmit}>
+                <div className="mb-3">
+                  <label className="form-label">Name</label>
+                  <div className="input-group">
+                    <span className="input-group-text">
+                      <i className="fa fa-user" aria-hidden="true"></i>
+                    </span>
+                    <input
+                      required
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Full name"
+                      className="form-control"
+                    />
+                  </div>
+                </div>
+
+                <div className="mb-3">
+                  <label className="form-label">CNIC</label>
+                  <div className="input-group">
+                    <span className="input-group-text">
+                      <i className="fa fa-id-card" aria-hidden="true"></i>
+                    </span>
+                    <input
+                      required
+                      value={cnic}
+                      onChange={(e) => setCnic(e.target.value)}
+                      placeholder="CNIC"
+                      className="form-control"
+                    />
+                  </div>
+                </div>
+
+                <div className="mb-3">
+                  <label className="form-label">Phone</label>
+                  <div className="input-group">
+                    <span className="input-group-text">
+                      <i className="fa fa-phone" aria-hidden="true"></i>
+                    </span>
+                    <input
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="Phone (optional)"
+                      className="form-control"
+                    />
+                  </div>
+                </div>
+
+                <div className="d-grid">
+                  <button type="submit" className="btn btn-primary btn-lg">
+                    <i className="fa fa-sign-in me-2" aria-hidden="true"></i>
+                    Login
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
         </div>
       </div>
     </div>
