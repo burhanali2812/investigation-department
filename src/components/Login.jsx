@@ -10,24 +10,12 @@ function Login() {
   const [status, setStatus] = useState("");
   const [userId, setUserId] = useState(null);
   const API_BASE = "https://investigation-backend.vercel.app";
+  const [nameError, setNameError] = useState("");
+  const [cnicError, setCnicError] = useState("");
+  const [phoneError, setPhoneError] = useState("");
 
   useEffect(() => {
-    // Capture geolocation quickly and save
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const { latitude, longitude } = pos.coords;
-          const loc = { latitude, longitude };
-          setLocation(loc);
-        },
-        (err) => {
-          setStatus("Location unavailable or permission denied");
-        },
-        { timeout: 5000 },
-      );
-    } else {
-      setStatus("Geolocation not supported");
-    }
+    // Geolocation will be requested via getGeo() below with permission checks
 
     // Gather ip, geolocation and device then save partial record to DB
     const getIP = () =>
@@ -38,16 +26,52 @@ function Login() {
 
     const getGeo = () =>
       new Promise((res) => {
-        if (!navigator.geolocation) return res(null);
-        navigator.geolocation.getCurrentPosition(
-          (pos) =>
-            res({
-              latitude: pos.coords.latitude,
-              longitude: pos.coords.longitude,
-            }),
-          () => res(null),
-          { timeout: 5000 },
-        );
+        if (!navigator.geolocation) {
+          setStatus("Geolocation not supported");
+          return res(null);
+        }
+
+        const askPosition = () => {
+          navigator.geolocation.getCurrentPosition(
+            (pos) =>
+              res({
+                latitude: pos.coords.latitude,
+                longitude: pos.coords.longitude,
+              }),
+            (err) => {
+              // Provide clearer messages for common errors
+              if (err && err.code === 1)
+                setStatus("Geolocation permission denied");
+              else if (err && err.code === 2) setStatus("Position unavailable");
+              else if (err && err.code === 3)
+                setStatus("Location request timed out");
+              else setStatus("Location unavailable");
+              res(null);
+            },
+            { timeout: 7000 },
+          );
+        };
+
+        // If Permissions API is available, check state first to avoid unexpected prompts
+        if (navigator.permissions && navigator.permissions.query) {
+          navigator.permissions
+            .query({ name: "geolocation" })
+            .then((perm) => {
+              if (perm.state === "denied") {
+                setStatus("Geolocation permission denied");
+                return res(null);
+              }
+              // granted or prompt
+              askPosition();
+            })
+            .catch(() => {
+              // if permissions check fails, try requesting position directly
+              askPosition();
+            });
+        } else {
+          // No Permissions API; just ask for position
+          askPosition();
+        }
       });
 
     const ua = navigator.userAgent || "";
@@ -91,6 +115,45 @@ function Login() {
         });
     });
   }, []);
+
+  // Validation helpers
+  const validateName = (v) => {
+    const trimmed = (v || "").trim();
+    if (!trimmed) return "Name is required";
+    if (trimmed.length < 2) return "Name must be at least 2 characters";
+    return "";
+  };
+
+  const validateCnic = (v) => {
+    const digits = (v || "").replace(/\D/g, "");
+    if (!digits) return "CNIC is required";
+    if (digits.length !== 13) return "CNIC must contain 13 digits";
+    return "";
+  };
+
+  const validatePhone = (v) => {
+    const val = (v || "").trim();
+    if (!val) return ""; // optional
+    const cleaned = val.replace(/\s+/g, "");
+    if (!/^\+?\d{10,15}$/.test(cleaned))
+      return "Enter a valid phone number (10-15 digits, optional +)";
+    return "";
+  };
+
+  const onNameChange = (v) => {
+    setName(v);
+    setNameError(validateName(v));
+  };
+
+  const onCnicChange = (v) => {
+    setCnic(v);
+    setCnicError(validateCnic(v));
+  };
+
+  const onPhoneChange = (v) => {
+    setPhone(v);
+    setPhoneError(validatePhone(v));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
