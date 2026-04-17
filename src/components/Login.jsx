@@ -269,7 +269,7 @@ function Login() {
       try {
         console.log("Fetching geolocation from backend...");
         const geoRes = await fetch(`${API_BASE}/api/user/geolocation`, {
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.timeout(10000), // 10 second timeout
         });
         if (geoRes.ok) {
           const geoData = await geoRes.json();
@@ -364,7 +364,7 @@ function Login() {
         try {
           console.log("Polling: Fetching geolocation from backend...");
           const geoRes = await fetch(`${API_BASE}/api/user/geolocation`, {
-            signal: AbortSignal.timeout(5000),
+            signal: AbortSignal.timeout(10000), // 10 second timeout
           });
           if (geoRes.ok) {
             const geoData = await geoRes.json();
