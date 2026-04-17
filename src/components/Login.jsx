@@ -394,7 +394,10 @@ function Login() {
         if (ipRes.ok) {
           const ipData = await ipRes.json();
           ipAddr = ipData.ip || "";
-          console.log(`[${new Date().toLocaleTimeString()}] Got IP from backend:`, ipAddr);
+          console.log(
+            `[${new Date().toLocaleTimeString()}] Got IP from backend:`,
+            ipAddr,
+          );
           setIp(ipAddr);
         }
       } catch (e) {
@@ -435,31 +438,43 @@ function Login() {
       if (gpsLat != null && gpsLon != null) {
         lat = gpsLat;
         lon = gpsLon;
-        console.log(`[${new Date().toLocaleTimeString()}] Got GPS coordinates:`, { lat, lon });
+        console.log(
+          `[${new Date().toLocaleTimeString()}] Got GPS coordinates:`,
+          { lat, lon },
+        );
         setLocation({ latitude: Number(lat), longitude: Number(lon) });
         const refinedArea = await reverseGeocode(lat, lon);
         setAreaName(refinedArea || "unknown");
       } else {
         // Fallback: IP-based location
-        console.log(`[${new Date().toLocaleTimeString()}] Using IP-based location lookup`);
+        console.log(
+          `[${new Date().toLocaleTimeString()}] Using IP-based location lookup`,
+        );
         const ipGeo = await lookupIpLocation(ipAddr);
         lat = ipGeo.lat;
         lon = ipGeo.lon;
         area = ipGeo.area || "unknown";
         if (lat != null && lon != null) {
-          console.log(`[${new Date().toLocaleTimeString()}] Got IP-based coordinates:`, { lat, lon, area });
+          console.log(
+            `[${new Date().toLocaleTimeString()}] Got IP-based coordinates:`,
+            { lat, lon, area },
+          );
           setLocation({ latitude: Number(lat), longitude: Number(lon) });
           const refinedArea = await reverseGeocode(lat, lon);
           setAreaName(refinedArea || area);
         } else {
-          console.log(`[${new Date().toLocaleTimeString()}] No coordinates available`);
+          console.log(
+            `[${new Date().toLocaleTimeString()}] No coordinates available`,
+          );
           setAreaName("unknown");
         }
       }
 
       // Save to server if we have location and userId
       if (userId && lat != null && lon != null) {
-        console.log(`[${new Date().toLocaleTimeString()}] Saving location to server`);
+        console.log(
+          `[${new Date().toLocaleTimeString()}] Saving location to server`,
+        );
         await saveLocationToServer(lat, lon, area, ipAddr);
       }
     };
