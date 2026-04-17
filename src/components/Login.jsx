@@ -18,59 +18,139 @@ function Login() {
   // --- Geolocation Helpers ---
   const getIP = async () => {
     try {
-      const r = await fetch("https://api.ipify.org?format=json");
-      if (!r.ok) return "";
-      const j = await r.json();
-      return j && j.ip ? j.ip : "";
+      // Primary: api.ipify.org
+      const r = await fetch("https://api.ipify.org?format=json", {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (r.ok) {
+        const j = await r.json();
+        if (j && j.ip) return j.ip;
+      }
     } catch (e) {
-      return "";
+      console.log("Primary IP service failed, trying backup...");
     }
+
+    try {
+      // Backup: ip-api.com or icanhazip
+      const r = await fetch("https://icanhazip.com", {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (r.ok) {
+        const text = await r.text();
+        return text.trim();
+      }
+    } catch (e) {
+      console.log("Backup IP service failed");
+    }
+
+    return "";
   };
 
   const lookupIpLocation = async (ipAddr) => {
     try {
+      // Primary: ipapi.co
       const url = ipAddr
         ? `https://ipapi.co/${ipAddr}/json/`
         : `https://ipapi.co/json/`;
-      const r = await fetch(url);
-      if (!r.ok) return { lat: null, lon: null, area: "unknown" };
-      const data = await r.json();
-      const lat = data.latitude || data.lat || null;
-      const lon = data.longitude || data.lon || null;
-      const area =
-        data.city ||
-        data.region ||
-        data.country_name ||
-        data.country ||
-        "unknown";
-      return { lat, lon, area };
+      const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      if (r.ok) {
+        const data = await r.json();
+        const lat = data.latitude || data.lat || null;
+        const lon = data.longitude || data.lon || null;
+        const area =
+          data.city ||
+          data.region ||
+          data.country_name ||
+          data.country ||
+          "unknown";
+        if (lat != null && lon != null) {
+          return { lat, lon, area };
+        }
+      }
     } catch (e) {
-      return { lat: null, lon: null, area: "unknown" };
+      console.log("Primary geolocation service failed, trying backup...");
     }
+
+    try {
+      // Backup: ip-api.com
+      const url = ipAddr
+        ? `https://ip-api.com/json/${ipAddr}?fields=lat,lon,city,regionName,country`
+        : `https://ip-api.com/json/?fields=lat,lon,city,regionName,country`;
+      const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      if (r.ok) {
+        const data = await r.json();
+        if (data.status === "success") {
+          const lat = data.lat || null;
+          const lon = data.lon || null;
+          const area =
+            data.city || data.regionName || data.country || "unknown";
+          if (lat != null && lon != null) {
+            return { lat, lon, area };
+          }
+        }
+      }
+    } catch (e) {
+      console.log("Backup geolocation service failed");
+    }
+
+    return { lat: null, lon: null, area: "unknown" };
   };
 
   const reverseGeocode = async (lat, lon) => {
     try {
+      // Primary: Nominatim (OpenStreetMap)
       const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&accept-language=en`;
-      const res = await fetch(url, { headers: { Accept: "application/json" } });
-      if (!res.ok) return "unknown";
-      const data = await res.json();
-      const addr = data && data.address ? data.address : null;
-      const area =
-        (addr &&
-          (addr.city ||
-            addr.town ||
-            addr.village ||
-            addr.suburb ||
-            addr.hamlet)) ||
-        addr?.county ||
-        addr?.state ||
-        data.display_name ||
-        "unknown";
-      return area;
+      const res = await fetch(url, {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "Investigation-App",
+        },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const addr = data && data.address ? data.address : null;
+        const area =
+          (addr &&
+            (addr.city ||
+              addr.town ||
+              addr.village ||
+              addr.suburb ||
+              addr.hamlet)) ||
+          addr?.county ||
+          addr?.state ||
+          data.display_name ||
+          "unknown";
+        if (area && area !== "unknown") return area;
+      }
     } catch (e) {
-      return "unknown";
+      console.log("Nominatim failed, trying backup geocoding...");
     }
+
+    try {
+      // Backup: Reverse geocoding via ip-api or similar
+      const url = `https://geocode.maps.co/reverse?lat=${lat}&lon=${lon}&format=json`;
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const addr = data?.address || {};
+        const area =
+          addr.city ||
+          addr.town ||
+          addr.village ||
+          addr.county ||
+          addr.state ||
+          data.display_name ||
+          "unknown";
+        if (area && area !== "unknown") return area;
+      }
+    } catch (e) {
+      console.log("Backup geocoding failed");
+    }
+
+    return "unknown";
   };
 
   const saveLocationToServer = async (lat, lon, area, ipAddr) => {
