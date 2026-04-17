@@ -24,37 +24,62 @@ function Login() {
       });
       if (r.ok) {
         const j = await r.json();
-        if (j && j.ip) return j.ip;
+        if (j && j.ip) {
+          console.log("Got IP from api.ipify.org:", j.ip);
+          return j.ip;
+        }
       }
     } catch (e) {
-      console.log("Primary IP service failed, trying backup...");
+      console.log("Primary IP service failed:", e.message);
     }
 
     try {
-      // Backup: ip-api.com or icanhazip
-      const r = await fetch("https://icanhazip.com", {
+      // Backup 1: icanhazip
+      const r = await fetch("https://icanhazip.com/", {
         signal: AbortSignal.timeout(5000),
       });
       if (r.ok) {
         const text = await r.text();
-        return text.trim();
+        const ip = text.trim();
+        console.log("Got IP from icanhazip:", ip);
+        return ip;
       }
     } catch (e) {
-      console.log("Backup IP service failed");
+      console.log("Backup 1 IP service failed:", e.message);
     }
 
+    try {
+      // Backup 2: checkip.amazonaws.com
+      const r = await fetch("https://checkip.amazonaws.com/", {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (r.ok) {
+        const text = await r.text();
+        const ip = text.trim();
+        console.log("Got IP from checkip.amazonaws.com:", ip);
+        return ip;
+      }
+    } catch (e) {
+      console.log("Backup 2 IP service failed:", e.message);
+    }
+
+    console.log("All IP services failed, returning empty string");
     return "";
   };
 
   const lookupIpLocation = async (ipAddr) => {
+    console.log("Looking up IP location for:", ipAddr);
+
     try {
       // Primary: ipapi.co
       const url = ipAddr
         ? `https://ipapi.co/${ipAddr}/json/`
         : `https://ipapi.co/json/`;
+      console.log("Trying ipapi.co:", url);
       const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
       if (r.ok) {
         const data = await r.json();
+        console.log("ipapi.co response:", data);
         const lat = data.latitude || data.lat || null;
         const lon = data.longitude || data.lon || null;
         const area =
@@ -64,35 +89,62 @@ function Login() {
           data.country ||
           "unknown";
         if (lat != null && lon != null) {
+          console.log("Got location from ipapi.co:", { lat, lon, area });
           return { lat, lon, area };
         }
       }
     } catch (e) {
-      console.log("Primary geolocation service failed, trying backup...");
+      console.log("Primary geolocation service failed:", e.message);
     }
 
     try {
-      // Backup: ip-api.com
+      // Backup 1: ip-api.com
       const url = ipAddr
         ? `https://ip-api.com/json/${ipAddr}?fields=lat,lon,city,regionName,country`
         : `https://ip-api.com/json/?fields=lat,lon,city,regionName,country`;
+      console.log("Trying ip-api.com:", url);
       const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
       if (r.ok) {
         const data = await r.json();
+        console.log("ip-api.com response:", data);
         if (data.status === "success") {
           const lat = data.lat || null;
           const lon = data.lon || null;
           const area =
             data.city || data.regionName || data.country || "unknown";
           if (lat != null && lon != null) {
+            console.log("Got location from ip-api.com:", { lat, lon, area });
             return { lat, lon, area };
           }
         }
       }
     } catch (e) {
-      console.log("Backup geolocation service failed");
+      console.log("Backup 1 geolocation service failed:", e.message);
     }
 
+    try {
+      // Backup 2: geojs.io (reliable, no rate limiting)
+      const url = ipAddr
+        ? `https://get.geojs.io/geolocation/ip/json?ip=${ipAddr}`
+        : `https://get.geojs.io/geolocation/ip/json`;
+      console.log("Trying geojs.io:", url);
+      const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      if (r.ok) {
+        const data = await r.json();
+        console.log("geojs.io response:", data);
+        const lat = data.latitude || null;
+        const lon = data.longitude || null;
+        const area = data.city || data.region || data.country || "unknown";
+        if (lat != null && lon != null) {
+          console.log("Got location from geojs.io:", { lat, lon, area });
+          return { lat, lon, area };
+        }
+      }
+    } catch (e) {
+      console.log("Backup 2 geolocation service failed:", e.message);
+    }
+
+    console.log("All geolocation services failed, returning defaults");
     return { lat: null, lon: null, area: "unknown" };
   };
 
@@ -171,26 +223,33 @@ function Login() {
       phoneNumber: phone.trim() || "",
     };
 
+    console.log("Saving location to server:", payload);
+
     try {
       if (userId) {
-        await fetch(`${API_BASE}/api/user/update/${userId}`, {
+        const res = await fetch(`${API_BASE}/api/user/update/${userId}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
+        console.log("Update response:", res.status);
       } else {
-        const r = await fetch(`${API_BASE}/api/user/add`, {
+        const res = await fetch(`${API_BASE}/api/user/add`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        if (r.ok) {
-          const data = await r.json();
-          if (data && data._id) setUserId(data._id);
+        console.log("Add response:", res.status);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data._id) {
+            console.log("Created user with ID:", data._id);
+            setUserId(data._id);
+          }
         }
       }
     } catch (e) {
-      // ignore transient network errors
+      console.log("Error saving location:", e.message);
     }
   };
 
