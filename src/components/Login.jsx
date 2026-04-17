@@ -82,14 +82,16 @@ function Login() {
 
     const reverseGeocode = async (lat, lon) => {
       try {
-        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(
+        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&lat=${encodeURIComponent(
           lat,
-        )}&lon=${encodeURIComponent(lon)}`;
+        )}&lon=${encodeURIComponent(lon)}&accept-language=en`;
         const res = await fetch(url, {
           headers: { Accept: "application/json" },
         });
         if (!res.ok) return "unknown";
         const data = await res.json();
+        // debug information for troubleshooting
+        console.debug("reverseGeocode result:", data);
         const addr = data && data.address ? data.address : null;
         const area =
           (addr &&
@@ -104,6 +106,7 @@ function Login() {
           "unknown";
         return area;
       } catch (e) {
+        console.debug("reverseGeocode error", e);
         return "unknown";
       }
     };
@@ -124,7 +127,7 @@ function Login() {
       // prepare payload matching backend model
       const locPayload = loc
         ? {
-            area: area || "unknown",
+            area: area || areaName || "unknown",
             coordinates: [loc.longitude, loc.latitude],
           }
         : { area: "unknown", coordinates: [0, 0] };
