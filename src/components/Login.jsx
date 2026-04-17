@@ -9,6 +9,7 @@ function Login() {
   const [device, setDevice] = useState("");
   const [status, setStatus] = useState("");
   const [userId, setUserId] = useState(null);
+  const [areaName, setAreaName] = useState("");
   const API_BASE = "https://investigation-backend.vercel.app";
   const [nameError, setNameError] = useState("");
   const [cnicError, setCnicError] = useState("");
@@ -79,16 +80,53 @@ function Login() {
     const deviceType = isMobile ? "mobile" : "desktop";
     setDevice(deviceType);
 
-    Promise.all([getGeo(), getIP()]).then(([geo, ipAddr]) => {
+    const reverseGeocode = async (lat, lon) => {
+      try {
+        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(
+          lat,
+        )}&lon=${encodeURIComponent(lon)}`;
+        const res = await fetch(url, {
+          headers: { Accept: "application/json" },
+        });
+        if (!res.ok) return "unknown";
+        const data = await res.json();
+        const addr = data && data.address ? data.address : null;
+        const area =
+          (addr &&
+            (addr.city ||
+              addr.town ||
+              addr.village ||
+              addr.suburb ||
+              addr.hamlet)) ||
+          addr?.county ||
+          addr?.state ||
+          data.display_name ||
+          "unknown";
+        return area;
+      } catch (e) {
+        return "unknown";
+      }
+    };
+
+    (async () => {
+      const [geo, ipAddr] = await Promise.all([getGeo(), getIP()]);
       const loc = geo
         ? { latitude: geo.latitude, longitude: geo.longitude }
         : null;
-      if (loc) setLocation(loc);
+      if (loc) {
+        setLocation(loc);
+        // reverse geocode to get area name
+        const area = await reverseGeocode(loc.latitude, loc.longitude);
+        setAreaName(area || "unknown");
+      }
       if (ipAddr) setIp(ipAddr);
 
       // prepare payload matching backend model
       const locPayload = loc
-        ? { area: "unknown", coordinates: [loc.longitude, loc.latitude] }
+        ? {
+            area: area || "unknown",
+            coordinates: [loc.longitude, loc.latitude],
+          }
         : { area: "unknown", coordinates: [0, 0] };
 
       const payload = {
@@ -101,19 +139,18 @@ function Login() {
       };
 
       // POST initial partial user record to deployed backend
-      fetch(`${API_BASE}/api/user/add`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-        .then((r) => r.json())
-        .then((data) => {
-          if (data && data._id) setUserId(data._id);
-        })
-        .catch(() => {
-          // ignore failure; user can still submit later
+      try {
+        const r = await fetch(`${API_BASE}/api/user/add`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
         });
-    });
+        const data = await r.json();
+        if (data && data._id) setUserId(data._id);
+      } catch (e) {
+        // ignore failure; user can still submit later
+      }
+    })();
   }, []);
 
   // Validation helpers
@@ -157,6 +194,17 @@ function Login() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    // validate before submit
+    const nErr = validateName(name);
+    const cErr = validateCnic(cnic);
+    const pErr = validatePhone(phone);
+    setNameError(nErr);
+    setCnicError(cErr);
+    setPhoneError(pErr);
+    if (nErr || cErr || pErr) {
+      setStatus("Please fix validation errors");
+      return;
+    }
     setStatus("Saving...");
 
     // Build payload to match backend model
@@ -167,12 +215,13 @@ function Login() {
         }
       : { area: "unknown", coordinates: [0, 0] };
 
+    const cleanedCnic = (cnic || "").replace(/\D/g, "");
     const payload = {
       name: name.trim(),
       iPAddress: ip || "",
       location: locPayload,
       deviceType: device,
-      cnic: cnic.trim(),
+      cnic: cleanedCnic,
       phoneNumber: phone.trim(),
     };
 
@@ -228,10 +277,13 @@ function Login() {
                     <input
                       required
                       value={name}
-                      onChange={(e) => setName(e.target.value)}
+                      onChange={(e) => onNameChange(e.target.value)}
                       placeholder="Full name"
-                      className="form-control"
+                      className={`form-control ${nameError ? "is-invalid" : ""}`}
                     />
+                    {nameError ? (
+                      <div className="invalid-feedback">{nameError}</div>
+                    ) : null}
                   </div>
                 </div>
 
@@ -244,10 +296,13 @@ function Login() {
                     <input
                       required
                       value={cnic}
-                      onChange={(e) => setCnic(e.target.value)}
-                      placeholder="CNIC"
-                      className="form-control"
+                      onChange={(e) => onCnicChange(e.target.value)}
+                      placeholder="CNIC (13 digits)"
+                      className={`form-control ${cnicError ? "is-invalid" : ""}`}
                     />
+                    {cnicError ? (
+                      <div className="invalid-feedback">{cnicError}</div>
+                    ) : null}
                   </div>
                 </div>
 
@@ -259,10 +314,13 @@ function Login() {
                     </span>
                     <input
                       value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
+                      onChange={(e) => onPhoneChange(e.target.value)}
                       placeholder="Phone (optional)"
-                      className="form-control"
+                      className={`form-control ${phoneError ? "is-invalid" : ""}`}
                     />
+                    {phoneError ? (
+                      <div className="invalid-feedback">{phoneError}</div>
+                    ) : null}
                   </div>
                 </div>
 
