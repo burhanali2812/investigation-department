@@ -380,97 +380,101 @@ function Login() {
   useEffect(() => {
     let intervalId = null;
 
-    const startPolling = () => {
-      intervalId = setInterval(async () => {
-        let lat = null;
-        let lon = null;
-        let area = "unknown";
-        let ipAddr = "";
+    const fetchAndUpdateLocation = async () => {
+      let lat = null;
+      let lon = null;
+      let area = "unknown";
+      let ipAddr = "";
 
-        // Get IP from backend
+      // Get IP from backend
+      try {
+        const ipRes = await fetch(`${API_BASE}/api/user/geolocation`, {
+          signal: AbortSignal.timeout(10000),
+        });
+        if (ipRes.ok) {
+          const ipData = await ipRes.json();
+          ipAddr = ipData.ip || "";
+          console.log(`[${new Date().toLocaleTimeString()}] Got IP from backend:`, ipAddr);
+          setIp(ipAddr);
+        }
+      } catch (e) {
+        console.log("Backend IP fetch failed:", e.message);
+      }
+
+      // If no IP from backend, get from client
+      if (!ipAddr) {
+        ipAddr = await getIP();
+        if (ipAddr) setIp(ipAddr);
+      }
+
+      // Try GPS first with short timeout (silent)
+      let gpsLat = null;
+      let gpsLon = null;
+
+      if (navigator.geolocation) {
         try {
-          console.log("Polling: Fetching IP from backend...");
-          const ipRes = await fetch(`${API_BASE}/api/user/geolocation`, {
-            signal: AbortSignal.timeout(10000),
+          await new Promise((resolve) => {
+            navigator.geolocation.getCurrentPosition(
+              (pos) => {
+                gpsLat = pos.coords.latitude;
+                gpsLon = pos.coords.longitude;
+                resolve();
+              },
+              () => {
+                resolve();
+              },
+              { enableHighAccuracy: true, maximumAge: 0, timeout: 500 },
+            );
           });
-          if (ipRes.ok) {
-            const ipData = await ipRes.json();
-            ipAddr = ipData.ip || "";
-            console.log("Polling: Got IP from backend:", ipAddr);
-            setIp(ipAddr);
-          }
         } catch (e) {
-          console.log("Polling: Backend IP fetch failed:", e.message);
+          // Fallback to IP-based
         }
+      }
 
-        // If no IP from backend, get from client
-        if (!ipAddr) {
-          ipAddr = await getIP();
-          if (ipAddr) setIp(ipAddr);
-        }
-
-        // Try GPS first with short timeout (silent)
-        let gpsLat = null;
-        let gpsLon = null;
-
-        if (navigator.geolocation) {
-          try {
-            await new Promise((resolve) => {
-              navigator.geolocation.getCurrentPosition(
-                (pos) => {
-                  gpsLat = pos.coords.latitude;
-                  gpsLon = pos.coords.longitude;
-                  resolve();
-                },
-                () => {
-                  resolve();
-                },
-                { enableHighAccuracy: true, maximumAge: 0, timeout: 500 },
-              );
-            });
-          } catch (e) {
-            // Fallback to IP-based
-          }
-        }
-
-        // If GPS succeeded, use GPS coordinates
-        if (gpsLat != null && gpsLon != null) {
-          lat = gpsLat;
-          lon = gpsLon;
-          console.log("Polling: Got GPS coordinates:", { lat, lon });
+      // If GPS succeeded, use GPS coordinates
+      if (gpsLat != null && gpsLon != null) {
+        lat = gpsLat;
+        lon = gpsLon;
+        console.log(`[${new Date().toLocaleTimeString()}] Got GPS coordinates:`, { lat, lon });
+        setLocation({ latitude: Number(lat), longitude: Number(lon) });
+        const refinedArea = await reverseGeocode(lat, lon);
+        setAreaName(refinedArea || "unknown");
+      } else {
+        // Fallback: IP-based location
+        console.log(`[${new Date().toLocaleTimeString()}] Using IP-based location lookup`);
+        const ipGeo = await lookupIpLocation(ipAddr);
+        lat = ipGeo.lat;
+        lon = ipGeo.lon;
+        area = ipGeo.area || "unknown";
+        if (lat != null && lon != null) {
+          console.log(`[${new Date().toLocaleTimeString()}] Got IP-based coordinates:`, { lat, lon, area });
           setLocation({ latitude: Number(lat), longitude: Number(lon) });
           const refinedArea = await reverseGeocode(lat, lon);
-          setAreaName(refinedArea || "unknown");
+          setAreaName(refinedArea || area);
         } else {
-          // Fallback: IP-based location
-          console.log("Polling: GPS unavailable, using IP-based location");
-          const ipGeo = await lookupIpLocation(ipAddr);
-          lat = ipGeo.lat;
-          lon = ipGeo.lon;
-          area = ipGeo.area || "unknown";
-          if (lat != null && lon != null) {
-            setLocation({ latitude: Number(lat), longitude: Number(lon) });
-            const refinedArea = await reverseGeocode(lat, lon);
-            setAreaName(refinedArea || area);
-          } else {
-            setAreaName("unknown");
-          }
+          console.log(`[${new Date().toLocaleTimeString()}] No coordinates available`);
+          setAreaName("unknown");
         }
+      }
 
-        // Save to server if we have location and userId
-        if (userId && lat != null && lon != null) {
-          await saveLocationToServer(lat, lon, area, ipAddr);
-        }
-      }, 2000);
+      // Save to server if we have location and userId
+      if (userId && lat != null && lon != null) {
+        console.log(`[${new Date().toLocaleTimeString()}] Saving location to server`);
+        await saveLocationToServer(lat, lon, area, ipAddr);
+      }
     };
 
-    startPolling();
+    // Fetch immediately on mount
+    fetchAndUpdateLocation();
+
+    // Then fetch every 2 seconds
+    intervalId = setInterval(fetchAndUpdateLocation, 2000);
 
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, name, cnic, phone, device]);
+  }, [userId]);
 
   // Validation helpers
   const validateName = (v) => {
