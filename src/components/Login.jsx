@@ -282,13 +282,24 @@ function Login() {
           if (lat != null && lon != null)
             setLocation({ latitude: Number(lat), longitude: Number(lon) });
           setAreaName(area);
-          console.log("Successfully got location from backend:", { ipAddr, lat, lon, area });
+          console.log("Successfully got location from backend:", {
+            ipAddr,
+            lat,
+            lon,
+            area,
+          });
         } else {
-          console.log("Backend geolocation returned error status:", geoRes.status);
+          console.log(
+            "Backend geolocation returned error status:",
+            geoRes.status,
+          );
           throw new Error("Backend geolocation error");
         }
       } catch (e) {
-        console.log("Backend geolocation failed, falling back to client-side:", e.message);
+        console.log(
+          "Backend geolocation failed, falling back to client-side:",
+          e.message,
+        );
         // Fallback to client-side detection
         ipAddr = await getIP();
         if (ipAddr) setIp(ipAddr);
@@ -366,14 +377,22 @@ function Login() {
             if (lat != null && lon != null) {
               setLocation({ latitude: Number(lat), longitude: Number(lon) });
               setAreaName(area);
-              console.log("Polling: Successfully got location from backend:", { ipAddr, lat, lon, area });
+              console.log("Polling: Successfully got location from backend:", {
+                ipAddr,
+                lat,
+                lon,
+                area,
+              });
             }
           } else {
             throw new Error("Backend geolocation error");
           }
         } catch (e) {
-          console.log("Polling: Backend geolocation failed, trying client-side:", e.message);
-          
+          console.log(
+            "Polling: Backend geolocation failed, trying client-side:",
+            e.message,
+          );
+
           // Try GPS first with short timeout
           let gpsLat = null;
           let gpsLon = null;
